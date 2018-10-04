@@ -21,6 +21,10 @@ double dt = 0.1;
 // This is the length from front to CoG that has a similar radius.
 const double Lf = 2.67;
 
+// Both the reference cross track and orientation errors are 0.
+// The reference velocity is set to 40 mph.
+double ref_v = 40;
+
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
 // when one variable starts and another ends to make our lifes easier.

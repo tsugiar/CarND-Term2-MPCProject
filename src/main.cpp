@@ -87,10 +87,40 @@ int main() {
           // j[1] is the data JSON object
           vector<double> ptsx = j[1]["ptsx"];
           vector<double> ptsy = j[1]["ptsy"];
+
+          Eigen::Vector3d ptsx_eigen(ptsx.data());
+          Eigen::Vector3d ptsy_eigen(ptsy.data());
+
           double px = j[1]["x"];
           double py = j[1]["y"];
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
+
+          // =================================================================
+          // Debug PrintOut, delete after finished debugging                 =
+          // Print out value of ptsx, ptsy, and px and py                    =
+          // =================================================================
+          for (int idx = 0; idx < ptsx.size(); ++idx)
+          {
+              std::cout << "(ptsx,ptsy) value @" << idx
+                        << " = (" << ptsx[idx] << "," << ptsy[idx] << ")"
+                        << std::endl;
+
+          }
+
+          std::cout << std::endl;
+          std::cout << "Corresponding (hostx,hosty) value is =("
+                    << px << "," << py << ")" << std::endl;
+          std::cout << std::endl;
+
+          //==================  END OF DEBUG PRINTOUT ==============================
+          //========================================================================
+
+          // Polynomil fit (third order)
+          auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 3);
+          double cte = polyeval(coeffs,px) - py;     // Compute lateral distance error
+          double epsi = psi - atan(coeffs[1]);           // Compute heading angle error
+
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
