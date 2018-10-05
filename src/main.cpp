@@ -68,11 +68,26 @@ Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
 int main() {
   uWS::Hub h;
 
+  // Initialize main function variables here
+  double px;
+  double py;
+  double psi;
+  double v;
+
+
+  double cte;
+  double epsi;
+  double steer_value;
+  double throttle_value;
+  Eigen::VectorXd state(6);
+
   // MPC is initialized here!
   MPC mpc;
 
-  h.onMessage([&mpc](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
-                     uWS::OpCode opCode) {
+  h.onMessage([&mpc, &px, &py, &psi, &v, &cte,
+              &epsi, &steer_value, &throttle_value, &state]
+              (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,uWS::OpCode opCode)
+  {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -91,10 +106,10 @@ int main() {
           Eigen::Vector3d ptsx_eigen(ptsx.data());
           Eigen::Vector3d ptsy_eigen(ptsy.data());
 
-          double px = j[1]["x"];
-          double py = j[1]["y"];
-          double psi = j[1]["psi"];
-          double v = j[1]["speed"];
+          px = j[1]["x"];
+          py = j[1]["y"];
+          psi = j[1]["psi"];
+          v = j[1]["speed"];
 
           // =================================================================
           // Debug PrintOut, delete after finished debugging                 =
@@ -116,11 +131,10 @@ int main() {
           //==================  END OF DEBUG PRINTOUT ==============================
           //========================================================================
 
-          // Polynomil fit (third order)
+          // Polynomial fit (third order)
           auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 3);
-          double cte = polyeval(coeffs,px) - py;     // Compute lateral distance error
-          double epsi = psi - atan(coeffs[1]);           // Compute heading angle error
-
+          cte = polyeval(coeffs,px) - py;     // Compute lateral distance error
+          epsi = psi - atan(coeffs[1]);           // Compute heading angle error
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -128,8 +142,22 @@ int main() {
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+
+          // Update state values
+          state[0] = px;
+          state[1] = py;
+          state[2] = psi;
+          state[3] = v;
+          state[4] = cte;
+          state[5] = epsi;
+
+          // Compute mpt
+          auto actuator_vec = mpc.Solve(state, coeffs);
+
+     //     double steer_value;
+     //     double throttle_value;
+          steer_value       = actuator_vec[0];
+          throttle_value    = actuator_vec[1];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
