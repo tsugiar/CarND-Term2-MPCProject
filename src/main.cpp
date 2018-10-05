@@ -81,11 +81,28 @@ int main() {
   double throttle_value;
   Eigen::VectorXd state(6);
 
+
+  // Initialize waypoint, assume that it consists
+  // of 6 elements
+  size_t  waypoint_vector_size = 6;
+  Eigen::VectorXd ptsx_eigen(waypoint_vector_size);
+  Eigen::VectorXd ptsy_eigen(waypoint_vector_size);
+
+
+  vector<double> ptsx;
+  vector<double> ptsy;
+
+  // Reserver space for ptsx and ptsy, initially set it to 20
+  ptsx.reserve(20);
+  ptsy.reserve(20);
+
   // MPC is initialized here!
   MPC mpc;
 
   h.onMessage([&mpc, &px, &py, &psi, &v, &cte,
-              &epsi, &steer_value, &throttle_value, &state]
+              &epsi, &ptsx, &ptsy, &ptsx_eigen, &ptsy_eigen,
+              &waypoint_vector_size,
+              &steer_value, &throttle_value, &state]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,uWS::OpCode opCode)
   {
     // "42" at the start of the message means there's a websocket message event.
@@ -99,12 +116,34 @@ int main() {
         auto j = json::parse(s);
         string event = j[0].get<string>();
         if (event == "telemetry") {
-          // j[1] is the data JSON object
-          vector<double> ptsx = j[1]["ptsx"];
-          vector<double> ptsy = j[1]["ptsy"];
 
-          Eigen::Vector3d ptsx_eigen(ptsx.data());
-          Eigen::Vector3d ptsy_eigen(ptsy.data());
+          // Obtain ptsx and ptsy vector
+          ptsx = j[1]["ptsx"].get<std::vector<double>>();
+          ptsy = j[1]["ptsy"].get<std::vector<double>>();
+
+          // Change size of ptsx_eigen and ptsy_eigen if it isn't the
+          // same as previous value
+          if (waypoint_vector_size != ptsx.size())
+          {
+              waypoint_vector_size = ptsx.size();
+   //           ptsx_eigen = Eigen::VectorXd(ptsx.size());
+   //           ptsy_eigen = Eigen::VectorXd(ptsy.size());
+
+                ptsx_eigen.resize(waypoint_vector_size);
+                ptsy_eigen.resize(waypoint_vector_size);
+          }
+
+          // Looping statement to file out ptsx_eigen and ptsy_eigen with data
+          // from ptsx and ptsy
+          for (int iter_ind = 0; iter_ind < ptsx.size(); ++iter_ind)
+          {
+              ptsx_eigen[iter_ind] = ptsx[iter_ind];
+              ptsy_eigen[iter_ind] = ptsy[iter_ind];
+          }
+
+
+
+          auto test = j[1]["ptsx"];
 
           px = j[1]["x"];
           py = j[1]["y"];
