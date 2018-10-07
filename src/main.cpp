@@ -74,13 +74,25 @@ int main() {
   double psi;
   double v;
 
+  double prev_delta = 0;
+  double prev_accel = 0;
+  double prev_psi = 0;
+  double est_roc = 0;
+  double yaw_rate_est = 0;
+  double feed_fwd_steer = 0;
+
+
+  double dx, dy;  // Distance from way-point to host vehicle
 
   double cte;
   double epsi;
   double steer_value;
   double throttle_value;
   Eigen::VectorXd state(6);
+  Eigen::VectorXd old_coeffs(4);
 
+
+  old_coeffs <<0 , 0, 0, 0;
 
   // Initialize waypoint, assume that it consists
   // of 6 elements
@@ -102,14 +114,15 @@ int main() {
   h.onMessage([&mpc, &px, &py, &psi, &v, &cte,
               &epsi, &ptsx, &ptsy, &ptsx_eigen, &ptsy_eigen,
               &waypoint_vector_size,
-              &steer_value, &throttle_value, &state]
+              &steer_value, &throttle_value, &state, &dx, &dy,
+              &prev_delta, &prev_accel, &est_roc, &yaw_rate_est, &feed_fwd_steer, &prev_psi]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,uWS::OpCode opCode)
   {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+  //  cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -117,7 +130,17 @@ int main() {
         string event = j[0].get<string>();
         if (event == "telemetry") {
 
+
+          // Obtain host-position, heading, and speed
+          px = j[1]["x"];
+          py = j[1]["y"];
+          psi = j[1]["psi"];
+          v =  static_cast<double>(j[1]["speed"]) *  0.44704;   // Obtain velocity and convert it from mph to meters/sec
+
+
           // Obtain ptsx and ptsy vector
+          ptsx.clear();
+          ptsy.clear();
           ptsx = j[1]["ptsx"].get<std::vector<double>>();
           ptsy = j[1]["ptsy"].get<std::vector<double>>();
 
@@ -126,45 +149,27 @@ int main() {
           if (waypoint_vector_size != ptsx.size())
           {
               waypoint_vector_size = ptsx.size();
-   //           ptsx_eigen = Eigen::VectorXd(ptsx.size());
-   //           ptsy_eigen = Eigen::VectorXd(ptsy.size());
-
                 ptsx_eigen.resize(waypoint_vector_size);
                 ptsy_eigen.resize(waypoint_vector_size);
           }
 
           // Looping statement to file out ptsx_eigen and ptsy_eigen with data
           // from ptsx and ptsy
-          for (int iter_ind = 0; iter_ind < ptsx.size(); ++iter_ind)
+          for (unsigned int iter_ind = 0; iter_ind < ptsx.size(); ++iter_ind)
           {
-              ptsx_eigen[iter_ind] = ptsx[iter_ind];
-              ptsy_eigen[iter_ind] = ptsy[iter_ind];
+              // Transformation of way-point vector to vehicle coord system
+              dx = ptsx[iter_ind] - px;
+              dy = ptsy[iter_ind] - py;
+
+              ptsx_eigen[iter_ind] =  dx * cos(psi) + dy * sin(psi);
+              ptsy_eigen[iter_ind] = -dx * sin(psi) + dy * cos(psi);
           }
 
-
-
-          auto test = j[1]["ptsx"];
-
-          px = j[1]["x"];
-          py = j[1]["y"];
-          psi = j[1]["psi"];
-          v = j[1]["speed"];
-
-          // =================================================================
-          // Debug PrintOut, delete after finished debugging                 =
-          // Print out value of ptsx, ptsy, and px and py                    =
-          // =================================================================
-          for (int idx = 0; idx < ptsx.size(); ++idx)
-          {
-              std::cout << "(ptsx,ptsy) value @" << idx
-                        << " = (" << ptsx[idx] << "," << ptsy[idx] << ")"
-                        << std::endl;
-
-          }
 
           std::cout << std::endl;
           std::cout << "Corresponding (hostx,hosty) value is =("
                     << px << "," << py << ")" << std::endl;
+          std::cout << "At speed : " << v << std::endl;
           std::cout << std::endl;
 
           //==================  END OF DEBUG PRINTOUT ==============================
@@ -172,8 +177,26 @@ int main() {
 
           // Polynomial fit (third order)
           auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 3);
-          cte = polyeval(coeffs,px) - py;     // Compute lateral distance error
-          epsi = psi - atan(coeffs[1]);           // Compute heading angle error
+
+          // Estimate roc from lane-poly
+          est_roc = 1/(2*coeffs[2]);
+
+          cte = polyeval(coeffs,0);     // Compute lateral distance error, at 0 point from host
+                                        // coordinate system
+          epsi = -atan(coeffs[1]);           // Compute heading angle error
+
+          // Estimate yaw-rate
+
+          if (v > 0.1)
+          {
+          yaw_rate_est = (psi - prev_psi)/100e-3;   // Estimate yaw-rate
+          feed_fwd_steer = asin(yaw_rate_est/est_roc / v);
+           }
+          else
+          {
+              feed_fwd_steer = 0;
+          }
+
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -183,30 +206,52 @@ int main() {
           */
 
           // Update state values
-          state[0] = px;
-          state[1] = py;
-          state[2] = psi;
-          state[3] = v;
+          state[0] = px * 0 ;
+          state[1] = py * 0 ;
+          state[2] = psi * 0 ;
+          state[3] = v ;
           state[4] = cte;
           state[5] = epsi;
 
           // Compute mpt
-          auto actuator_vec = mpc.Solve(state, coeffs);
+          auto solution_vec = mpc.Solve(state, coeffs, prev_delta, prev_accel);
+          steer_value       = solution_vec[0] + feed_fwd_steer;
+          throttle_value    = solution_vec[1];
 
-     //     double steer_value;
-     //     double throttle_value;
-          steer_value       = actuator_vec[0];
-          throttle_value    = actuator_vec[1];
+
+          std::cout << "Steering value is " << steer_value/M_PI * 180 << "\t" << "Cte value is : " << cte << std::endl;
+          std::cout << "Feed forward steering value : " << feed_fwd_steer/M_PI * 180 << std::endl;
+          std::cout << "Throttle value is " << throttle_value << "\t" << "Speed value is " << v  << std::endl;
+          std::cout << "CTE val " << cte << std::endl;
+          std::cout << "epsi val : " << "(" << epsi/M_PI*180 << std::endl;
+          std::cout << std::endl;
+
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = steer_value/deg2rad(25);
           msgJson["throttle"] = throttle_value;
+
+          // Store previous steering value
+          prev_delta = steer_value;
+          prev_accel = throttle_value;
+          prev_psi = psi;
 
           //Display the MPC predicted trajectory 
           vector<double> mpc_x_vals;
           vector<double> mpc_y_vals;
+
+          // Determine size of x,y values from solution vector
+          size_t soln_vec_xysize = (solution_vec.size()-2);
+          for (unsigned int iter_idx = 0 ; iter_idx < soln_vec_xysize; iter_idx=iter_idx+2)
+          {
+              mpc_x_vals.push_back(solution_vec[2+iter_idx]);
+              mpc_y_vals.push_back(solution_vec[2+iter_idx+1]);
+
+
+          }
+
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -221,12 +266,19 @@ int main() {
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
 
+          for (unsigned int i=0 ; i < 100; ++i)
+          {
+              next_x_vals.push_back(static_cast<double>(i));
+              next_y_vals.push_back(polyeval(coeffs,i));
+
+          }
+
           msgJson["next_x"] = next_x_vals;
           msgJson["next_y"] = next_y_vals;
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+     //     std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.
