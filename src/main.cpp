@@ -77,9 +77,7 @@ int main() {
   double prev_delta = 0;
   double prev_accel = 0;
   double prev_psi = 0;
-  double est_roc = 0;
-  double yaw_rate_est = 0;
-  double feed_fwd_steer = 0;
+  double integrator_gain = 0;
 
 
   double dx, dy;  // Distance from way-point to host vehicle
@@ -115,7 +113,7 @@ int main() {
               &epsi, &ptsx, &ptsy, &ptsx_eigen, &ptsy_eigen,
               &waypoint_vector_size,
               &steer_value, &throttle_value, &state, &dx, &dy,
-              &prev_delta, &prev_accel, &est_roc, &yaw_rate_est, &feed_fwd_steer, &prev_psi]
+              &prev_delta, &prev_accel, &prev_psi, &integrator_gain]
               (uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,uWS::OpCode opCode)
   {
     // "42" at the start of the message means there's a websocket message event.
@@ -166,6 +164,9 @@ int main() {
           }
 
 
+          // ======================================================================
+          //  =================  Debug PrintOut ===================================
+
           std::cout << std::endl;
           std::cout << "Corresponding (hostx,hosty) value is =("
                     << px << "," << py << ")" << std::endl;
@@ -177,26 +178,12 @@ int main() {
 
           // Polynomial fit (third order)
           auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 3);
-
-          // Estimate roc from lane-poly
-          est_roc = 1/(2*coeffs[2]);
-
           cte = polyeval(coeffs,0);     // Compute lateral distance error, at 0 point from host
                                         // coordinate system
           epsi = -atan(coeffs[1]);           // Compute heading angle error
 
-          // Estimate yaw-rate
-
-          if (v > 0.1)
-          {
-          yaw_rate_est = (psi - prev_psi)/100e-3;   // Estimate yaw-rate
-          feed_fwd_steer = asin(yaw_rate_est/est_roc / v);
-           }
-          else
-          {
-              feed_fwd_steer = 0;
-          }
-
+          // compute integrator gain  (small integrator for added stability)
+          integrator_gain = integrator_gain -0.001 * cte * 100e-3;
 
           /*
           * TODO: Calculate steering angle and throttle using MPC.
@@ -206,24 +193,23 @@ int main() {
           */
 
           // Update state values
-          state[0] = px * 0 ;
-          state[1] = py * 0 ;
-          state[2] = psi * 0 ;
+          state[0] =  0 ;
+          state[1] =  0 ;
+          state[2] =  0 ;
           state[3] = v ;
           state[4] = cte;
           state[5] = epsi;
 
           // Compute mpt
           auto solution_vec = mpc.Solve(state, coeffs, prev_delta, prev_accel);
-          steer_value       = solution_vec[0] + feed_fwd_steer;
+          steer_value       = solution_vec[0] + integrator_gain;
           throttle_value    = solution_vec[1];
 
 
           std::cout << "Steering value is " << steer_value/M_PI * 180 << "\t" << "Cte value is : " << cte << std::endl;
-          std::cout << "Feed forward steering value : " << feed_fwd_steer/M_PI * 180 << std::endl;
           std::cout << "Throttle value is " << throttle_value << "\t" << "Speed value is " << v  << std::endl;
           std::cout << "CTE val " << cte << std::endl;
-          std::cout << "epsi val : " << "(" << epsi/M_PI*180 << std::endl;
+          std::cout << "epsi val : " << epsi/M_PI*180 << std::endl;
           std::cout << std::endl;
 
 
